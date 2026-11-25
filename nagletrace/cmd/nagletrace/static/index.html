@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NagleTrace — Nagle / 延迟确认互等诊断台</title>
+<style>
+:root {
+  --bg: #0f1420;
+  --panel: #171e2e;
+  --panel2: #1e2740;
+  --line: #2a3550;
+  --text: #dbe4f5;
+  --muted: #8494b3;
+  --client: #5ab0ff;
+  --server: #ffb454;
+  --data: #7ee0a3;
+  --ack: #c39bff;
+  --bad: #ff6b6b;
+  --warn: #ffd166;
+  --ok: #69d39b;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 14px/1.55 -apple-system, "PingFang SC", "Segoe UI", sans-serif;
+}
+header {
+  padding: 14px 22px; border-bottom: 1px solid var(--line);
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  background: linear-gradient(180deg, #141b2c, #0f1420);
+}
+header h1 { font-size: 18px; margin: 0; letter-spacing: .5px; }
+header h1 span { color: var(--client); }
+.controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+select, button {
+  background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+  border-radius: 8px; padding: 8px 12px; font-size: 13px; cursor: pointer;
+}
+button.primary { background: #2c4f8f; border-color: #3a63b0; }
+button:hover, select:hover { border-color: #4a6aa0; }
+main { padding: 20px 22px; max-width: 1280px; margin: 0 auto; }
+.grid { display: grid; grid-template-columns: 1fr 360px; gap: 18px; }
+@media (max-width: 1000px) { .grid { grid-template-columns: 1fr; } }
+.card {
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 12px; padding: 16px 18px; margin-bottom: 18px;
+}
+.card h2 { font-size: 14px; margin: 0 0 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+.stat-row { display: flex; gap: 10px; flex-wrap: wrap; }
+.stat {
+  background: var(--panel2); border: 1px solid var(--line); border-radius: 10px;
+  padding: 10px 14px; min-width: 100px;
+}
+.stat .v { font-size: 18px; font-weight: 600; }
+.stat .k { color: var(--muted); font-size: 12px; }
+.badge {
+  display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600;
+}
+.badge.critical { background: rgba(255,107,107,.15); color: var(--bad); border: 1px solid rgba(255,107,107,.4); }
+.badge.warning  { background: rgba(255,209,102,.13); color: var(--warn); border: 1px solid rgba(255,209,102,.4); }
+.badge.info     { background: rgba(105,211,155,.13); color: var(--ok); border: 1px solid rgba(105,211,155,.4); }
+.wait {
+  border-left: 3px solid var(--bad); background: var(--panel2);
+  border-radius: 8px; padding: 10px 12px; margin-bottom: 10px;
+}
+.wait.warning { border-left-color: var(--warn); }
+.wait.info { border-left-color: var(--ok); }
+.wait .top { display: flex; justify-content: space-between; gap: 8px; font-weight: 600; }
+.wait .meta { color: var(--muted); font-size: 12.5px; margin-top: 4px; }
+.wait ul { margin: 8px 0 0; padding-left: 18px; font-size: 12.5px; color: #b9c6e0; }
+.wait .fix { margin-top: 8px; font-size: 12.5px; color: var(--data); }
+svg { width: 100%; display: block; }
+.lane-label { font-weight: 700; }
+.pkt-data { fill: var(--data); }
+.pkt-ack  { fill: var(--ack); }
+.pkt-syn  { fill: var(--warn); }
+.pkt-fin  { fill: var(--bad); }
+.pkt-rex  { fill: var(--bad); }
+.stall-band { fill: rgba(255,107,107,.10); }
+.stall-band.delack { fill: rgba(255,209,102,.10); }
+.tick { stroke: var(--line); stroke-dasharray: 3 4; }
+.tick-label { fill: var(--muted); font-size: 11px; }
+.arrow-line { stroke-width: 1.6; fill: none; }
+.arrow-data { stroke: var(--data); }
+.arrow-ack  { stroke: var(--ack); }
+.arrow-syn  { stroke: var(--warn); }
+.arrow-fin  { stroke: var(--bad); }
+.arrow-rex  { stroke: var(--bad); stroke-dasharray: 5 3; }
+.pkt-label { font-size: 10.5px; fill: var(--muted); }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 8px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; }
+.muted { color: var(--muted); }
+.crosscheck { font-size: 12.5px; color: var(--data); background: rgba(126,224,163,.08); border: 1px solid rgba(126,224,163,.25); padding: 8px 10px; border-radius: 8px; margin-top: 10px; }
+table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); }
+th { color: var(--muted); font-weight: 600; }
+tr.bad td { color: var(--bad); }
+.scroll { max-height: 420px; overflow: auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1><span>Nagle</span>Trace</h1>
+  <div class="controls">
+    <select id="preset"></select>
+    <button class="primary" id="run">运行仿真</button>
+    <button id="matrixBtn">跑组合矩阵</button>
+  </div>
+  <span class="muted" id="scenarioName"></span>
+</header>
+<main>
+  <div class="grid">
+    <div>
+      <div class="card">
+        <h2>延迟分布</h2>
+        <div class="stat-row" id="stats"></div>
+      </div>
+      <div class="card">
+        <h2>报文时序图（虚拟时间）</h2>
+        <div id="timeline"></div>
+        <div class="legend">
+          <span><i style="background:var(--data)"></i>数据包</span>
+          <span><i style="background:var(--ack)"></i>纯 ACK</span>
+          <span><i style="background:var(--warn)"></i>SYN/握手</span>
+          <span><i style="background:var(--bad)"></i>FIN/重传</span>
+          <span><i style="background:rgba(255,107,107,.35)"></i>Nagle×延迟ACK 互等</span>
+          <span><i style="background:rgba(255,209,102,.35)"></i>纯延迟 ACK 等待</span>
+        </div>
+      </div>
+      <div class="card" id="matrixCard" style="display:none">
+        <h2>组合矩阵（写法 × 选项 × 丢包）</h2>
+        <div class="scroll"><table id="matrix"></table></div>
+      </div>
+    </div>
+    <div>
+      <div class="card">
+        <h2>自动诊断</h2>
+        <div id="verdict"></div>
+      </div>
+      <div class="card">
+        <h2>等待事件</h2>
+        <div id="waits"></div>
+      </div>
+    </div>
+  </div>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>
